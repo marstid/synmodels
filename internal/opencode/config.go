@@ -19,6 +19,24 @@ const (
 	ConfigFilename = "opencode.json"
 	// BackupSuffix is the suffix added to backup files.
 	BackupSuffix = "-backup"
+	// EnvConfigPath is the environment variable for custom config path.
+	EnvConfigPath = "OPENCODE_CONFIG"
+	// EnvAPIBaseURL is the environment variable for custom API base URL.
+	EnvAPIBaseURL = "SYN_API"
+	// DefaultBaseURL is the default Synthetic API base URL.
+	DefaultBaseURL = "https://api.synthetic.new/openai/v1"
+)
+
+// ConfigStatus represents the state of the opencode config.
+type ConfigStatus int
+
+const (
+	// ConfigNotFound indicates the config file doesn't exist.
+	ConfigNotFound ConfigStatus = iota
+	// ConfigExistsNoProvider indicates config exists but no synthetic provider.
+	ConfigExistsNoProvider
+	// ConfigExistsWithProvider indicates config exists with synthetic provider.
+	ConfigExistsWithProvider
 )
 
 // Config represents the root structure of the opencode.json file.
@@ -49,7 +67,13 @@ func NewManagerWithPath(configPath string) *Manager {
 }
 
 // getDefaultConfigPath returns the default path to the opencode config file.
+// Checks OPENCODE_CONFIG environment variable first, then falls back to default location.
 func getDefaultConfigPath() string {
+	// Check for environment variable override
+	if envPath := os.Getenv(EnvConfigPath); envPath != "" {
+		return envPath
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		// Fall back to relative path if we can't get home dir
@@ -225,6 +249,71 @@ func (m *Manager) ConfigExists() bool {
 	configPath := expandPath(m.configPath)
 	_, err := os.Stat(configPath)
 	return err == nil
+}
+
+// CheckConfigStatus checks if config exists and has synthetic provider.
+func (m *Manager) CheckConfigStatus() ConfigStatus {
+	if !m.ConfigExists() {
+		return ConfigNotFound
+	}
+
+	cfg, err := m.Read()
+	if err != nil {
+		return ConfigNotFound
+	}
+
+	provider, ok := cfg.data["provider"].(map[string]interface{})
+	if !ok || provider == nil {
+		return ConfigExistsNoProvider
+	}
+
+	synthetic, ok := provider["synthetic"].(map[string]interface{})
+	if !ok || synthetic == nil {
+		return ConfigExistsNoProvider
+	}
+
+	// Check if synthetic has required fields (npm indicates proper structure)
+	if _, hasNPM := synthetic["npm"]; !hasNPM {
+		return ConfigExistsNoProvider // Wrong structure
+	}
+
+	return ConfigExistsWithProvider
+}
+
+// CreateSyntheticProvider creates a new synthetic provider with the given API key.
+func (m *Manager) CreateSyntheticProvider(apiKey string) error {
+	cfg, err := m.Read()
+	if err != nil {
+		return err
+	}
+
+	// Ensure provider map exists
+	provider, ok := cfg.data["provider"].(map[string]interface{})
+	if !ok || provider == nil {
+		provider = make(map[string]interface{})
+		cfg.data["provider"] = provider
+	}
+
+	// Get base URL from env or use default
+	baseURL := DefaultBaseURL
+	if envURL := os.Getenv(EnvAPIBaseURL); envURL != "" {
+		baseURL = envURL
+	}
+
+	// Create synthetic provider
+	synthetic := map[string]interface{}{
+		"npm":  "@ai-sdk/openai-compatible",
+		"name": "Synthetic",
+		"options": map[string]interface{}{
+			"apiKey":  apiKey,
+			"baseURL": baseURL,
+		},
+		"models": make(map[string]interface{}),
+	}
+
+	provider["synthetic"] = synthetic
+
+	return m.Write(cfg)
 }
 
 // GetData returns the underlying data map (for testing purposes).

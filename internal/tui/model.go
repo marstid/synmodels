@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -78,11 +79,19 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 // FullHelp returns a complete help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
+	bindings := [][]key.Binding{
 		{k.Up, k.Down, k.Toggle},
 		{k.SelectAll, k.DeselectAll, k.Generate},
-		{k.Apply, k.Help, k.Quit},
 	}
+
+	// Only show Apply if it's enabled (has help text)
+	if k.Apply.Help().Key != "" {
+		bindings = append(bindings, []key.Binding{k.Apply})
+	}
+
+	bindings = append(bindings, []key.Binding{k.Help, k.Quit})
+
+	return bindings
 }
 
 // Styles holds the lipgloss styles for the TUI.
@@ -131,6 +140,18 @@ type applyResultMsg struct {
 	err error
 }
 
+// applyState represents the current state of the apply operation.
+type applyState int
+
+const (
+	stateNone applyState = iota
+	stateWaitingForApply
+	stateNeedProvider
+	stateWaitingForAPIKey
+	stateApplySuccess
+	stateApplyError
+)
+
 // Model represents the Bubble Tea model for the TUI.
 type Model struct {
 	models          []types.SelectedModel
@@ -151,6 +172,11 @@ type Model struct {
 	applyError      error
 	applySuccess    bool
 	configManager   *opencode.Manager
+	configStatus    opencode.ConfigStatus
+	configPath      string
+	apiKeyInput     string
+	applyState      applyState
+	baseURL         string
 }
 
 // NewModel creates a new TUI model with the given models.
@@ -168,6 +194,17 @@ func NewModel(models []types.Model) Model {
 		}
 	}
 
+	// Initialize config manager and check status
+	configManager := opencode.NewManager()
+	configStatus := configManager.CheckConfigStatus()
+	configPath := configManager.GetConfigPath()
+
+	// Get base URL for display
+	baseURL := opencode.DefaultBaseURL
+	if envURL, ok := os.LookupEnv(opencode.EnvAPIBaseURL); ok && envURL != "" {
+		baseURL = envURL
+	}
+
 	return Model{
 		models:        selectedModels,
 		cursor:        0,
@@ -177,7 +214,11 @@ func NewModel(models []types.Model) Model {
 		spinner:       s,
 		loading:       false,
 		generator:     config.NewGenerator(config.FormatJSON),
-		configManager: opencode.NewManager(),
+		configManager: configManager,
+		configStatus:  configStatus,
+		configPath:    configPath,
+		applyState:    stateNone,
+		baseURL:       baseURL,
 	}
 }
 
@@ -196,6 +237,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle API key input mode first
+		if m.applyState == stateWaitingForAPIKey {
+			switch {
+			case key.Matches(msg, m.keys.Quit):
+				// Cancel API key input and go back to need provider state
+				m.applyState = stateNeedProvider
+				m.apiKeyInput = ""
+				return m, nil
+
+			case msg.Type == tea.KeyEnter:
+				// Submit API key
+				if m.apiKeyInput != "" {
+					return m, m.createProviderAndApply()
+				}
+				return m, nil
+
+			case msg.Type == tea.KeyBackspace:
+				// Remove last character
+				if len(m.apiKeyInput) > 0 {
+					m.apiKeyInput = m.apiKeyInput[:len(m.apiKeyInput)-1]
+				}
+				return m, nil
+
+			default:
+				// Add character to input
+				if msg.Type == tea.KeyRunes {
+					m.apiKeyInput += string(msg.Runes)
+				}
+				return m, nil
+			}
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			m.quitting = true
@@ -236,30 +309,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.Generate):
+			// If we're in a terminal state, reset to allow regeneration
+			if m.applyState == stateApplySuccess || m.applyState == stateApplyError || m.applyState == stateNone {
+				m.generated = ""
+				m.applyState = stateNone
+				m.applySuccess = false
+				m.applyError = nil
+				return m, nil
+			}
+
 			output, err := m.generator.GenerateFromSelected(m.models)
 			if err != nil {
 				m.err = err
 			} else {
 				m.generated = output
-				m.waitingForApply = true
-				m.applySuccess = false
 				m.applyError = nil
+				// Set appropriate state based on config status
+				switch m.configStatus {
+				case opencode.ConfigNotFound:
+					m.applyState = stateNone
+				case opencode.ConfigExistsNoProvider:
+					m.applyState = stateNeedProvider
+				case opencode.ConfigExistsWithProvider:
+					m.applyState = stateWaitingForApply
+				}
 			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.Apply):
-			if m.waitingForApply && m.generated != "" {
+			if m.applyState == stateWaitingForApply && m.generated != "" {
 				return m, m.applyConfig()
+			} else if m.applyState == stateNeedProvider {
+				// Start API key input mode
+				m.applyState = stateWaitingForAPIKey
+				m.apiKeyInput = ""
+				return m, nil
 			}
 			return m, nil
 		}
 
 	case applyResultMsg:
-		m.waitingForApply = false
 		if msg.err != nil {
+			m.applyState = stateApplyError
 			m.applyError = msg.err
 			m.applySuccess = false
 		} else {
+			m.applyState = stateApplySuccess
 			m.applySuccess = true
 			m.applyError = nil
 		}
@@ -302,18 +397,43 @@ func (m Model) View() string {
 		sb.WriteString(m.generated)
 		sb.WriteString("\n\n")
 
-		// Show apply prompt or result
-		if m.applySuccess {
+		// Show apply prompt or result based on state
+		switch m.applyState {
+		case stateNone:
+			if m.configStatus == opencode.ConfigNotFound {
+				sb.WriteString(m.styles.Error.Render("⚠ Apply disabled - no opencode config found\n"))
+				sb.WriteString(m.styles.Help.Render(fmt.Sprintf("Config path: %s\n", m.configPath)))
+			}
+			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
+
+		case stateNeedProvider:
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Error.Render("⚠ Synthetic provider not configured in opencode\n"))
+			sb.WriteString("Add provider and models? [y/N]\n")
+			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("\nBase URL: %s\n", m.baseURL)))
+			sb.WriteString(m.styles.Help.Render("Press 'y' to add provider, 'q' to quit, or 'g' to generate again\n"))
+
+		case stateWaitingForAPIKey:
+			sb.WriteString("\n")
+			sb.WriteString("Enter your Synthetic API key:\n")
+			sb.WriteString("> " + m.apiKeyInput + "\n")
+			sb.WriteString(m.styles.Help.Render("\nPress Enter to confirm, Backspace to delete, or 'q' to cancel\n"))
+
+		case stateApplySuccess:
 			sb.WriteString(m.styles.Success.Render("✓ Configuration applied to opencode successfully!\n"))
 			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
-		} else if m.applyError != nil {
+
+		case stateApplyError:
 			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("✗ Failed to apply configuration: %v\n", m.applyError)))
-			sb.WriteString(m.styles.Help.Render("\nPress 'y' to retry, 'q' to quit, or 'g' to generate again\n"))
-		} else if m.waitingForApply {
+			if m.configStatus == opencode.ConfigExistsNoProvider {
+				sb.WriteString(m.styles.Help.Render("\nPress 'y' to retry, 'q' to quit, or 'g' to generate again\n"))
+			} else {
+				sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
+			}
+
+		case stateWaitingForApply:
 			sb.WriteString("Apply this configuration to your opencode config? [y/N]\n")
 			sb.WriteString(m.styles.Help.Render("\nPress 'y' to apply, 'q' to quit, or 'g' to generate again\n"))
-		} else {
-			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
 		}
 		return sb.String()
 	}
@@ -425,6 +545,23 @@ func (m Model) applyConfig() tea.Cmd {
 		}
 
 		return applyResultMsg{err: nil}
+	}
+}
+
+// createProviderAndApply creates the synthetic provider and applies the configuration.
+func (m Model) createProviderAndApply() tea.Cmd {
+	return func() tea.Msg {
+		// Create provider first
+		if err := m.configManager.CreateSyntheticProvider(m.apiKeyInput); err != nil {
+			return applyResultMsg{err: fmt.Errorf("failed to create provider: %w", err)}
+		}
+
+		// Update status
+		m.configStatus = opencode.ConfigExistsWithProvider
+
+		// Now apply models using the existing applyConfig logic
+		cmd := m.applyConfig()
+		return cmd()
 	}
 }
 
