@@ -310,12 +310,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Generate):
 			// If we're in a terminal state, reset to allow regeneration
-			if m.applyState == stateApplySuccess || m.applyState == stateApplyError || m.applyState == stateNone {
+			if m.applyState == stateApplySuccess || m.applyState == stateApplyError {
 				m.generated = ""
 				m.applyState = stateNone
 				m.applySuccess = false
 				m.applyError = nil
-				return m, nil
+				// Continue to generate after reset
 			}
 
 			output, err := m.generator.GenerateFromSelected(m.models)
