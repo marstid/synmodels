@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/marstid/synmodel/internal/types"
+	"github.com/marstid/synmodels/internal/types"
 )
 
 func TestGetModelConfig(t *testing.T) {

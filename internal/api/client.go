@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/marstid/synmodel/internal/types"
+	"github.com/marstid/synmodels/internal/types"
 )
 
 const (

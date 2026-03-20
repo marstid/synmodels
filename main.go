@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/marstid/synmodel/internal/api"
-	"github.com/marstid/synmodel/internal/tui"
+	"github.com/marstid/synmodels/internal/api"
+	"github.com/marstid/synmodels/internal/tui"
 )
 
 func main() {

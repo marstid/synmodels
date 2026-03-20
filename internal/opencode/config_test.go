@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marstid/synmodel/internal/config"
+	"github.com/marstid/synmodels/internal/config"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

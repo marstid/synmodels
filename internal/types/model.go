@@ -12,6 +12,17 @@ type Model struct {
 	ContextLength     int      `json:"context_length"`
 	MaxOutputLength   int      `json:"max_output_length"`
 	SupportedFeatures []string `json:"supported_features"`
+	Pricing           Pricing  `json:"pricing"`
+}
+
+// Pricing represents the pricing information for a model.
+type Pricing struct {
+	Prompt           string `json:"prompt"`
+	Completion       string `json:"completion"`
+	Image            string `json:"image"`
+	Request          string `json:"request"`
+	InputCacheReads  string `json:"input_cache_reads"`
+	InputCacheWrites string `json:"input_cache_writes"`
 }
 
 // ModelsResponse represents the API response containing a list of models.

@@ -1,4 +1,4 @@
-module github.com/marstid/synmodel
+module github.com/marstid/synmodels
 
 go 1.26.1
 

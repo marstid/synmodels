@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/marstid/synmodel/internal/types"
+	"github.com/marstid/synmodels/internal/types"
 )
 
 // OutputFormat represents the format of the generated config.
@@ -74,6 +74,17 @@ type ModelConfig struct {
 	ToolCall   bool            `json:"tool_call"`
 	Limit      ModelLimits     `json:"limit"`
 	Modalities ModelModalities `json:"modalities"`
+	Pricing    PricingInfo     `json:"pricing,omitempty"`
+}
+
+// PricingInfo represents the pricing information for a model configuration.
+type PricingInfo struct {
+	Prompt           string `json:"prompt,omitempty"`
+	Completion       string `json:"completion,omitempty"`
+	Image            string `json:"image,omitempty"`
+	Request          string `json:"request,omitempty"`
+	InputCacheReads  string `json:"input_cache_reads,omitempty"`
+	InputCacheWrites string `json:"input_cache_writes,omitempty"`
 }
 
 // ModelLimits represents the context and output token limits.
@@ -137,6 +148,14 @@ func GetModelConfig(model types.Model) ModelConfig {
 		Modalities: ModelModalities{
 			Input:  inputModalities,
 			Output: outputModalities,
+		},
+		Pricing: PricingInfo{
+			Prompt:           model.Pricing.Prompt,
+			Completion:       model.Pricing.Completion,
+			Image:            model.Pricing.Image,
+			Request:          model.Pricing.Request,
+			InputCacheReads:  model.Pricing.InputCacheReads,
+			InputCacheWrites: model.Pricing.InputCacheWrites,
 		},
 	}
 }

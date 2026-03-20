@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marstid/synmodel/internal/config"
+	"github.com/marstid/synmodels/internal/config"
 )
 
 const (

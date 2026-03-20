@@ -11,9 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/marstid/synmodel/internal/config"
-	"github.com/marstid/synmodel/internal/opencode"
-	"github.com/marstid/synmodel/internal/types"
+	"github.com/marstid/synmodels/internal/config"
+	"github.com/marstid/synmodels/internal/opencode"
+	"github.com/marstid/synmodels/internal/types"
 )
 
 // KeyMap defines the key bindings for the TUI.
