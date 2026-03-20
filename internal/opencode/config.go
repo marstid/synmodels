@@ -153,9 +153,9 @@ func (m *Manager) Write(cfg *Config) error {
 	// Add trailing newline
 	data = append(data, '\n')
 
-	// Write to file atomically
+	// Write to file atomically with secure permissions (owner only)
 	tempPath := configPath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp config file: %w", err)
 	}
 
@@ -252,14 +252,21 @@ func (m *Manager) ConfigExists() bool {
 }
 
 // CheckConfigStatus checks if config exists and has synthetic provider.
+// Treats missing or empty config files as needing provider creation.
 func (m *Manager) CheckConfigStatus() ConfigStatus {
 	if !m.ConfigExists() {
-		return ConfigNotFound
+		// Treat missing file as "needs provider" so we can create it
+		return ConfigExistsNoProvider
 	}
 
 	cfg, err := m.Read()
 	if err != nil {
-		return ConfigNotFound
+		return ConfigExistsNoProvider
+	}
+
+	// Check if config is essentially empty (no meaningful data)
+	if len(cfg.data) == 0 {
+		return ConfigExistsNoProvider
 	}
 
 	provider, ok := cfg.data["provider"].(map[string]interface{})

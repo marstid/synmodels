@@ -325,13 +325,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.generated = output
 				m.applyError = nil
 				// Set appropriate state based on config status
+				// ConfigNotFound is treated as ConfigExistsNoProvider (missing/empty file)
 				switch m.configStatus {
-				case opencode.ConfigNotFound:
-					m.applyState = stateNone
-				case opencode.ConfigExistsNoProvider:
-					m.applyState = stateNeedProvider
 				case opencode.ConfigExistsWithProvider:
 					m.applyState = stateWaitingForApply
+				default:
+					// This includes ConfigExistsNoProvider and ConfigNotFound
+					m.applyState = stateNeedProvider
 				}
 			}
 			return m, nil
@@ -400,17 +400,16 @@ func (m Model) View() string {
 		// Show apply prompt or result based on state
 		switch m.applyState {
 		case stateNone:
-			if m.configStatus == opencode.ConfigNotFound {
-				sb.WriteString(m.styles.Error.Render("⚠ Apply disabled - no opencode config found\n"))
-				sb.WriteString(m.styles.Help.Render(fmt.Sprintf("Config path: %s\n", m.configPath)))
-			}
+			// This state is used after terminal states or when waiting for user action
 			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
 
 		case stateNeedProvider:
+			// This handles: missing file, empty file, or no provider
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Error.Render("⚠ Synthetic provider not configured in opencode\n"))
 			sb.WriteString("Add provider and models? [y/N]\n")
-			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("\nBase URL: %s\n", m.baseURL)))
+			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("\nConfig path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("Base URL: %s\n", m.baseURL)))
 			sb.WriteString(m.styles.Help.Render("Press 'y' to add provider, 'q' to quit, or 'g' to generate again\n"))
 
 		case stateWaitingForAPIKey:
