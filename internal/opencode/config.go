@@ -337,6 +337,50 @@ func (m *Manager) CreateSyntheticProvider(apiKey string) error {
 	return m.WriteInitial(cfg)
 }
 
+// CreateProviderAndAddModels creates a new synthetic provider and adds models in a single write operation.
+// This is used when creating the initial config to avoid creating unnecessary backups.
+func (m *Manager) CreateProviderAndAddModels(apiKey string, models map[string]config.ModelConfig) error {
+	cfg, err := m.Read()
+	if err != nil {
+		return err
+	}
+
+	// Ensure provider map exists
+	provider, ok := cfg.data["provider"].(map[string]interface{})
+	if !ok || provider == nil {
+		provider = make(map[string]interface{})
+		cfg.data["provider"] = provider
+	}
+
+	// Get base URL from env or use default
+	baseURL := DefaultBaseURL
+	if envURL := os.Getenv(EnvAPIBaseURL); envURL != "" {
+		baseURL = envURL
+	}
+
+	// Create new models map with selected models
+	newModelsMap := make(map[string]interface{})
+	for modelID, modelCfg := range models {
+		newModelsMap[modelID] = modelCfg
+	}
+
+	// Create synthetic provider with models
+	synthetic := map[string]interface{}{
+		"npm":  "@ai-sdk/openai-compatible",
+		"name": "Synthetic",
+		"options": map[string]interface{}{
+			"apiKey":  apiKey,
+			"baseURL": baseURL,
+		},
+		"models": newModelsMap,
+	}
+
+	provider["synthetic"] = synthetic
+
+	// Use WriteInitial since we're creating everything for the first time
+	return m.WriteInitial(cfg)
+}
+
 // GetData returns the underlying data map (for testing purposes).
 func (c *Config) GetData() map[string]interface{} {
 	return c.data

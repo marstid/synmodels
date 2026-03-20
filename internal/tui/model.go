@@ -635,20 +635,40 @@ func (m Model) applyConfig() tea.Cmd {
 	}
 }
 
-// createProviderAndApply creates the synthetic provider and applies the configuration.
+// createProviderAndApply creates the synthetic provider and applies the configuration in a single operation.
 func (m Model) createProviderAndApply() tea.Cmd {
 	return func() tea.Msg {
-		// Create provider first
-		if err := m.configManager.CreateSyntheticProvider(m.apiKeyInput); err != nil {
-			return applyResultMsg{err: fmt.Errorf("failed to create provider: %w", err)}
+		// Get selected models
+		var selected []types.Model
+		for _, sm := range m.models {
+			if sm.Selected {
+				selected = append(selected, sm.Model)
+			}
+		}
+
+		if len(selected) == 0 {
+			return applyResultMsg{err: fmt.Errorf("no models selected")}
+		}
+
+		// Build models map
+		modelsMap := make(map[string]config.ModelConfig)
+		for _, model := range selected {
+			modelID := model.ID
+			if !strings.HasPrefix(modelID, "hf:") {
+				modelID = "hf:" + modelID
+			}
+			modelsMap[modelID] = config.GetModelConfig(model)
+		}
+
+		// Create provider and add models in a single write operation
+		if err := m.configManager.CreateProviderAndAddModels(m.apiKeyInput, modelsMap); err != nil {
+			return applyResultMsg{err: fmt.Errorf("failed to create provider and add models: %w", err)}
 		}
 
 		// Update status
 		m.configStatus = opencode.ConfigExistsWithProvider
 
-		// Now apply models using the existing applyConfig logic
-		cmd := m.applyConfig()
-		return cmd()
+		return applyResultMsg{err: nil}
 	}
 }
 
