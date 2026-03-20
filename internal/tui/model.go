@@ -105,6 +105,9 @@ type Styles struct {
 	Help         lipgloss.Style
 	Error        lipgloss.Style
 	Success      lipgloss.Style
+	Action       lipgloss.Style // Bold, standout color for actions
+	Info         lipgloss.Style // For config details (path, URL)
+	Label        lipgloss.Style // For "Configuration:" headers
 }
 
 // DefaultStyles returns the default styles.
@@ -132,6 +135,14 @@ func DefaultStyles() Styles {
 			Foreground(lipgloss.Color("#EF4444")),
 		Success: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#10B981")),
+		Action: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#7C3AED")),
+		Info: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9CA3AF")),
+		Label: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#E5E7EB")),
 	}
 }
 
@@ -401,38 +412,69 @@ func (m Model) View() string {
 		switch m.applyState {
 		case stateNone:
 			// This state is used after terminal states or when waiting for user action
-			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
 
 		case stateNeedProvider:
 			// This handles: missing file, empty file, or no provider
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Error.Render("⚠ Synthetic provider not configured in opencode\n"))
-			sb.WriteString("Add provider and models? [y/N]\n")
-			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("\nConfig path: %s\n", m.configPath)))
-			sb.WriteString(m.styles.Help.Render(fmt.Sprintf("Base URL: %s\n", m.baseURL)))
-			sb.WriteString(m.styles.Help.Render("Press 'y' to add provider, 'q' to quit, or 'g' to generate again\n"))
+			sb.WriteString(m.styles.Error.Render("⚠ No Synthetic provider configured\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  API:  %s\n", m.baseURL)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Action.Render("→ Press 'y' to create provider and apply\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
 
 		case stateWaitingForAPIKey:
 			sb.WriteString("\n")
-			sb.WriteString("Enter your Synthetic API key:\n")
+			sb.WriteString(m.styles.Label.Render("Enter Synthetic API key:\n"))
 			sb.WriteString("> " + m.apiKeyInput + "\n")
-			sb.WriteString(m.styles.Help.Render("\nPress Enter to confirm, Backspace to delete, or 'q' to cancel\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Action.Render("→ Press Enter to confirm\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press Backspace to delete\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to cancel\n"))
 
 		case stateApplySuccess:
-			sb.WriteString(m.styles.Success.Render("✓ Configuration applied to opencode successfully!\n"))
-			sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Success.Render("✓ Configuration applied successfully\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
 
 		case stateApplyError:
-			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("✗ Failed to apply configuration: %v\n", m.applyError)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("✗ Failed to apply configuration\n")))
+			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("  %v\n", m.applyError)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString("\n")
 			if m.configStatus == opencode.ConfigExistsNoProvider {
-				sb.WriteString(m.styles.Help.Render("\nPress 'y' to retry, 'q' to quit, or 'g' to generate again\n"))
-			} else {
-				sb.WriteString(m.styles.Help.Render("\nPress 'q' to quit or 'g' to generate again\n"))
+				sb.WriteString(m.styles.Action.Render("→ Press 'y' to retry\n"))
 			}
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
 
 		case stateWaitingForApply:
-			sb.WriteString("Apply this configuration to your opencode config? [y/N]\n")
-			sb.WriteString(m.styles.Help.Render("\nPress 'y' to apply, 'q' to quit, or 'g' to generate again\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Ready to apply configuration\n"))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString("\n")
+			sb.WriteString(m.styles.Action.Render("→ Press 'y' to apply\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
 		}
 		return sb.String()
 	}
