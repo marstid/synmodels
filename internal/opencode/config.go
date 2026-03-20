@@ -126,8 +126,19 @@ func (m *Manager) Read() (*Config, error) {
 	return &Config{data: rawData}, nil
 }
 
-// Write writes the configuration to disk with a backup.
+// Write writes the configuration to disk with a backup if the file exists.
 func (m *Manager) Write(cfg *Config) error {
+	return m.writeWithOptions(cfg, false)
+}
+
+// WriteInitial writes the configuration to disk without creating a backup.
+// Use this when creating a new config file for the first time.
+func (m *Manager) WriteInitial(cfg *Config) error {
+	return m.writeWithOptions(cfg, true)
+}
+
+// writeWithOptions writes the configuration with optional backup skip.
+func (m *Manager) writeWithOptions(cfg *Config, skipBackup bool) error {
 	configPath := expandPath(m.configPath)
 
 	// Ensure the directory exists
@@ -136,11 +147,13 @@ func (m *Manager) Write(cfg *Config) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Create backup if the file exists
-	if _, err := os.Stat(configPath); err == nil {
-		backupPath := configPath + BackupSuffix
-		if err := m.createBackup(configPath, backupPath); err != nil {
-			return fmt.Errorf("failed to create backup: %w", err)
+	// Create backup if the file exists and backup is not skipped
+	if !skipBackup {
+		if _, err := os.Stat(configPath); err == nil {
+			backupPath := configPath + BackupSuffix
+			if err := m.createBackup(configPath, backupPath); err != nil {
+				return fmt.Errorf("failed to create backup: %w", err)
+			}
 		}
 	}
 
@@ -320,7 +333,8 @@ func (m *Manager) CreateSyntheticProvider(apiKey string) error {
 
 	provider["synthetic"] = synthetic
 
-	return m.Write(cfg)
+	// Use WriteInitial since we're creating the provider for the first time
+	return m.WriteInitial(cfg)
 }
 
 // GetData returns the underlying data map (for testing purposes).
