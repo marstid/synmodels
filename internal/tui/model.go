@@ -364,12 +364,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyState = stateApplyError
 			m.applyError = msg.err
 			m.applySuccess = false
-		} else {
-			m.applyState = stateApplySuccess
-			m.applySuccess = true
-			m.applyError = nil
+			return m, nil
 		}
-		return m, nil
+		// Success - show success state then quit automatically
+		m.applyState = stateApplySuccess
+		m.applySuccess = true
+		m.applyError = nil
+		// Return tea.Quit to exit after showing success message
+		return m, tea.Quit
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -414,7 +416,7 @@ func (m Model) View() string {
 			// This state is used after terminal states or when waiting for user action
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("Path: %s\n", m.configPath)))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
 			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
@@ -425,8 +427,8 @@ func (m Model) View() string {
 			sb.WriteString(m.styles.Error.Render("⚠ No Synthetic provider configured\n"))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  API:  %s\n", m.baseURL)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("Path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("API: %s\n", m.baseURL)))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Action.Render("→ Press 'y' to create provider and apply\n"))
 			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
@@ -446,18 +448,15 @@ func (m Model) View() string {
 			sb.WriteString(m.styles.Success.Render("✓ Configuration applied successfully\n"))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
-			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
-			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again\n"))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("Path: %s\n", m.configPath)))
 
 		case stateApplyError:
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("✗ Failed to apply configuration\n")))
-			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("  %v\n", m.applyError)))
+			sb.WriteString(m.styles.Error.Render(fmt.Sprintf("%v\n", m.applyError)))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("Path: %s\n", m.configPath)))
 			sb.WriteString("\n")
 			if m.configStatus == opencode.ConfigExistsNoProvider {
 				sb.WriteString(m.styles.Action.Render("→ Press 'y' to retry\n"))
@@ -470,7 +469,7 @@ func (m Model) View() string {
 			sb.WriteString(m.styles.Label.Render("Ready to apply configuration\n"))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Label.Render("Configuration:\n"))
-			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("  Path: %s\n", m.configPath)))
+			sb.WriteString(m.styles.Info.Render(fmt.Sprintf("Path: %s\n", m.configPath)))
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Action.Render("→ Press 'y' to apply\n"))
 			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit\n"))
