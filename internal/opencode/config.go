@@ -37,6 +37,8 @@ const (
 	ConfigExistsNoProvider
 	// ConfigExistsWithProvider indicates config exists with synthetic provider.
 	ConfigExistsWithProvider
+	// ConfigUnreadable indicates config exists but could not be read or parsed.
+	ConfigUnreadable
 )
 
 // Config represents the root structure of the opencode.json file.
@@ -76,6 +78,7 @@ func getDefaultConfigPath() string {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not determine home directory (%v); config will be read/written relative to the current working directory\n", err)
 		// Fall back to relative path if we can't get home dir
 		return filepath.Join(".config", "opencode", ConfigFilename)
 	}
@@ -143,7 +146,7 @@ func (m *Manager) writeWithOptions(cfg *Config, skipBackup bool) error {
 
 	// Ensure the directory exists
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -195,8 +198,14 @@ func (m *Manager) createBackup(sourcePath, backupPath string) error {
 	}
 
 	// Write to backup file
-	if err := os.WriteFile(backupPathWithTimestamp, data, 0o644); err != nil {
+	tempPath := backupPathWithTimestamp + ".tmp"
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	if err := os.Rename(tempPath, backupPathWithTimestamp); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to rename backup file: %w", err)
 	}
 
 	return nil
@@ -227,12 +236,16 @@ func (m *Manager) AddModels(models map[string]config.ModelConfig) error {
 	// Get or create the synthetic provider
 	synthetic, ok := provider["synthetic"].(map[string]interface{})
 	if !ok || synthetic == nil {
+		baseURL := DefaultBaseURL
+		if envURL := os.Getenv(EnvAPIBaseURL); envURL != "" {
+			baseURL = envURL
+		}
 		// Create default synthetic provider
 		synthetic = map[string]interface{}{
 			"npm":  "@ai-sdk/openai-compatible",
 			"name": "Synthetic",
 			"options": map[string]interface{}{
-				"baseURL": "https://api.synthetic.new/openai/v1",
+				"baseURL": baseURL,
 			},
 			"models": make(map[string]interface{}),
 		}
@@ -274,7 +287,7 @@ func (m *Manager) CheckConfigStatus() ConfigStatus {
 
 	cfg, err := m.Read()
 	if err != nil {
-		return ConfigExistsNoProvider
+		return ConfigUnreadable
 	}
 
 	// Check if config is essentially empty (no meaningful data)

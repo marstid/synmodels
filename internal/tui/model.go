@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -26,6 +27,7 @@ type KeyMap struct {
 	DeselectAll key.Binding
 	Generate    key.Binding
 	Apply       key.Binding
+	Back        key.Binding
 	Quit        key.Binding
 	Help        key.Binding
 }
@@ -35,15 +37,15 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Up: key.NewBinding(
 			key.WithKeys("up", "k"),
-			key.WithHelp("↑/k", "up"),
+			key.WithHelp("↑/k", "move up"),
 		),
 		Down: key.NewBinding(
 			key.WithKeys("down", "j"),
-			key.WithHelp("↓/j", "down"),
+			key.WithHelp("↓/j", "move down"),
 		),
 		Toggle: key.NewBinding(
 			key.WithKeys(" ", "x"),
-			key.WithHelp("space/x", "toggle"),
+			key.WithHelp("space/x", "toggle select"),
 		),
 		SelectAll: key.NewBinding(
 			key.WithKeys("a"),
@@ -55,11 +57,15 @@ func DefaultKeyMap() KeyMap {
 		),
 		Generate: key.NewBinding(
 			key.WithKeys("g", "enter"),
-			key.WithHelp("g/enter", "generate config"),
+			key.WithHelp("g/enter", "preview config"),
 		),
 		Apply: key.NewBinding(
 			key.WithKeys("y"),
 			key.WithHelp("y", "apply to opencode"),
+		),
+		Back: key.NewBinding(
+			key.WithKeys("esc", "b"),
+			key.WithHelp("esc/b", "back to list"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
@@ -67,31 +73,24 @@ func DefaultKeyMap() KeyMap {
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
+			key.WithHelp("?", "toggle help"),
 		),
 	}
 }
 
-// ShortHelp returns a concise help view.
+// ShortHelp returns a concise inline help showing the most essential keys.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Toggle, k.Help, k.Quit}
 }
 
-// FullHelp returns a complete help view.
+// FullHelp returns a sectioned help view grouping keys by category.
 func (k KeyMap) FullHelp() [][]key.Binding {
-	bindings := [][]key.Binding{
-		{k.Up, k.Down, k.Toggle},
-		{k.SelectAll, k.DeselectAll, k.Generate},
+	return [][]key.Binding{
+		{k.Up, k.Down},
+		{k.Toggle, k.SelectAll, k.DeselectAll},
+		{k.Generate, k.Apply, k.Back},
+		{k.Help, k.Quit},
 	}
-
-	// Only show Apply if it's enabled (has help text)
-	if k.Apply.Help().Key != "" {
-		bindings = append(bindings, []key.Binding{k.Apply})
-	}
-
-	bindings = append(bindings, []key.Binding{k.Help, k.Quit})
-
-	return bindings
 }
 
 // Styles holds the lipgloss styles for the TUI.
@@ -174,7 +173,6 @@ type Model struct {
 	loading         bool
 	err             error
 	generated       string
-	showHelp        bool
 	width           int
 	height          int
 	quitting        bool
@@ -188,6 +186,8 @@ type Model struct {
 	apiKeyInput     string
 	applyState      applyState
 	baseURL         string
+	envAPIKey       string
+	viewport        viewport.Model
 }
 
 // NewModel creates a new TUI model with the given models.
@@ -216,6 +216,21 @@ func NewModel(models []types.Model) Model {
 		baseURL = envURL
 	}
 
+	// Check for pre-set API key from environment
+	envAPIKey := os.Getenv("SYNTHETIC_API_KEY")
+
+	gen := config.NewGenerator(config.FormatJSON).WithBaseURL(baseURL).WithAPIKey(envAPIKey)
+
+	vp := viewport.New(0, 0)
+	vp.KeyMap = viewport.KeyMap{
+		PageDown:     key.NewBinding(key.WithKeys("pgdown")),
+		PageUp:       key.NewBinding(key.WithKeys("pgup")),
+		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u")),
+		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d")),
+		Down:         key.NewBinding(key.WithKeys("down", "j")),
+		Up:           key.NewBinding(key.WithKeys("up", "k")),
+	}
+
 	return Model{
 		models:        selectedModels,
 		cursor:        0,
@@ -224,12 +239,14 @@ func NewModel(models []types.Model) Model {
 		styles:        DefaultStyles(),
 		spinner:       s,
 		loading:       false,
-		generator:     config.NewGenerator(config.FormatJSON),
+		generator:     gen,
 		configManager: configManager,
 		configStatus:  configStatus,
 		configPath:    configPath,
 		applyState:    stateNone,
 		baseURL:       baseURL,
+		envAPIKey:     envAPIKey,
+		viewport:      vp,
 	}
 }
 
@@ -245,13 +262,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height - 12
 		return m, nil
 
 	case tea.KeyMsg:
 		// Handle API key input mode first
 		if m.applyState == stateWaitingForAPIKey {
 			switch {
-			case key.Matches(msg, m.keys.Quit):
+			case msg.Type == tea.KeyCtrlC, msg.Type == tea.KeyEsc:
 				// Cancel API key input and go back to need provider state
 				m.applyState = stateNeedProvider
 				m.apiKeyInput = ""
@@ -272,7 +291,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			default:
-				// Add character to input
+				// Add character to input (including 'q')
 				if msg.Type == tea.KeyRunes {
 					m.apiKeyInput += string(msg.Runes)
 				}
@@ -286,16 +305,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Help):
-			m.showHelp = !m.showHelp
+			m.help.ShowAll = !m.help.ShowAll
+			return m, nil
+
+		case key.Matches(msg, m.keys.Back):
+			// Return to the model list from the generated-config view
+			if m.generated != "" && m.applyState != stateApplySuccess && m.applyState != stateApplyError {
+				m.generated = ""
+				m.applyState = stateNone
+				m.applyError = nil
+			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.Up):
+			if m.generated != "" && m.applyState != stateApplySuccess && m.applyState != stateApplyError {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd
+			}
 			if m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
+			if m.generated != "" && m.applyState != stateApplySuccess && m.applyState != stateApplyError {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd
+			}
 			if m.cursor < len(m.models)-1 {
 				m.cursor++
 			}
@@ -334,6 +372,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = err
 			} else {
 				m.generated = output
+				m.viewport.SetContent(output)
+				m.viewport.GotoTop()
+				m.err = nil
 				m.applyError = nil
 				// Set appropriate state based on config status
 				// ConfigNotFound is treated as ConfigExistsNoProvider (missing/empty file)
@@ -351,12 +392,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.applyState == stateWaitingForApply && m.generated != "" {
 				return m, m.applyConfig()
 			} else if m.applyState == stateNeedProvider {
-				// Start API key input mode
+				if m.envAPIKey != "" {
+					m.apiKeyInput = m.envAPIKey
+					return m, m.createProviderAndApply()
+				}
 				m.applyState = stateWaitingForAPIKey
 				m.apiKeyInput = ""
 				return m, nil
+			} else if m.applyState == stateApplyError && m.configStatus == opencode.ConfigExistsNoProvider {
+				// Retry: re-enter the provider creation flow
+				m.applyState = stateNeedProvider
+				m.applyError = nil
+				return m, nil
 			}
 			return m, nil
+		}
+
+		if m.generated != "" && m.applyState != stateApplySuccess && m.applyState != stateApplyError {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
 
 	case applyResultMsg:
@@ -400,15 +455,14 @@ func (m Model) View() string {
 	// Error display
 	if m.err != nil {
 		sb.WriteString(m.styles.Error.Render(fmt.Sprintf("Error: %v\n\n", m.err)))
-		m.err = nil // Clear error after displaying
 	}
 
 	// Generated config display
 	if m.generated != "" {
 		sb.WriteString(m.styles.Success.Render("✓ Generated Config:\n"))
 		sb.WriteString("\n")
-		sb.WriteString(m.generated)
-		sb.WriteString("\n\n")
+		sb.WriteString(m.viewport.View())
+		sb.WriteString("\n")
 
 		// Show apply prompt or result based on state
 		switch m.applyState {
@@ -447,11 +501,15 @@ func (m Model) View() string {
 			sb.WriteString(" ")
 			sb.WriteString(m.styles.Info.Render(m.baseURL))
 			sb.WriteString("\n\n")
+			if m.envAPIKey != "" {
+				sb.WriteString(m.styles.Success.Render("✓ SYNTHETIC_API_KEY detected from environment"))
+				sb.WriteString("\n\n")
+			}
 			sb.WriteString(m.styles.Action.Render("→ Press 'y' to create provider and apply"))
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'esc' to back to list"))
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit"))
 			sb.WriteString("\n")
 
 		case stateWaitingForAPIKey:
@@ -465,7 +523,7 @@ func (m Model) View() string {
 			sb.WriteString("\n")
 			sb.WriteString(m.styles.Action.Render("→ Press Backspace to delete"))
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'q' to cancel"))
+			sb.WriteString(m.styles.Action.Render("→ Press Esc to cancel"))
 			sb.WriteString("\n")
 
 		case stateApplySuccess:
@@ -517,9 +575,9 @@ func (m Model) View() string {
 			sb.WriteString("\n\n")
 			sb.WriteString(m.styles.Action.Render("→ Press 'y' to apply"))
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'esc' to back to list"))
 			sb.WriteString("\n")
-			sb.WriteString(m.styles.Action.Render("→ Press 'g' to generate again"))
+			sb.WriteString(m.styles.Action.Render("→ Press 'q' to quit"))
 			sb.WriteString("\n")
 		}
 		return sb.String()
@@ -553,11 +611,13 @@ func (m Model) View() string {
 	sb.WriteString("\n\n")
 
 	// Help
-	if m.showHelp {
-		sb.WriteString(m.help.View(m.keys))
-	} else {
-		sb.WriteString(m.styles.Help.Render("Press '?' for help, 'q' to quit"))
+	if m.help.ShowAll {
+		sb.WriteString(m.styles.Label.Render("Keyboard Shortcuts"))
+		sb.WriteString("\n")
+		sb.WriteString(strings.Repeat("─", min(m.width, 40)))
+		sb.WriteString("\n")
 	}
+	sb.WriteString(m.help.View(m.keys))
 
 	return sb.String()
 }
@@ -601,32 +661,31 @@ func (m Model) GetSelectedModels() []types.Model {
 	return selected
 }
 
+// snapshotSelected returns a deep copy of the currently selected models,
+// safe to read from a goroutine without racing the main loop's slice mutations.
+func (m Model) snapshotSelected() []types.Model {
+	var selected []types.Model
+	for _, sm := range m.models {
+		if sm.Selected {
+			selected = append(selected, sm.Model)
+		}
+	}
+	return selected
+}
+
 // applyConfig applies the generated configuration to the opencode config file.
 func (m Model) applyConfig() tea.Cmd {
+	selected := m.snapshotSelected()
 	return func() tea.Msg {
-		// Get selected models
-		var selected []types.Model
-		for _, sm := range m.models {
-			if sm.Selected {
-				selected = append(selected, sm.Model)
-			}
-		}
-
 		if len(selected) == 0 {
 			return applyResultMsg{err: fmt.Errorf("no models selected")}
 		}
 
-		// Build models map with detailed config for each model
 		modelsMap := make(map[string]config.ModelConfig)
 		for _, model := range selected {
-			modelID := model.ID
-			if !strings.HasPrefix(modelID, "hf:") {
-				modelID = "hf:" + modelID
-			}
-			modelsMap[modelID] = config.GetModelConfig(model)
+			modelsMap[config.OpencodeModelKey(model)] = config.GetModelConfig(model)
 		}
 
-		// Apply to opencode config
 		if err := m.configManager.AddModels(modelsMap); err != nil {
 			return applyResultMsg{err: err}
 		}
@@ -637,36 +696,21 @@ func (m Model) applyConfig() tea.Cmd {
 
 // createProviderAndApply creates the synthetic provider and applies the configuration in a single operation.
 func (m Model) createProviderAndApply() tea.Cmd {
+	selected := m.snapshotSelected()
+	apiKey := m.apiKeyInput
 	return func() tea.Msg {
-		// Get selected models
-		var selected []types.Model
-		for _, sm := range m.models {
-			if sm.Selected {
-				selected = append(selected, sm.Model)
-			}
-		}
-
 		if len(selected) == 0 {
 			return applyResultMsg{err: fmt.Errorf("no models selected")}
 		}
 
-		// Build models map
 		modelsMap := make(map[string]config.ModelConfig)
 		for _, model := range selected {
-			modelID := model.ID
-			if !strings.HasPrefix(modelID, "hf:") {
-				modelID = "hf:" + modelID
-			}
-			modelsMap[modelID] = config.GetModelConfig(model)
+			modelsMap[config.OpencodeModelKey(model)] = config.GetModelConfig(model)
 		}
 
-		// Create provider and add models in a single write operation
-		if err := m.configManager.CreateProviderAndAddModels(m.apiKeyInput, modelsMap); err != nil {
+		if err := m.configManager.CreateProviderAndAddModels(apiKey, modelsMap); err != nil {
 			return applyResultMsg{err: fmt.Errorf("failed to create provider and add models: %w", err)}
 		}
-
-		// Update status
-		m.configStatus = opencode.ConfigExistsWithProvider
 
 		return applyResultMsg{err: nil}
 	}
