@@ -84,7 +84,7 @@ func TestGetModelConfig(t *testing.T) {
 			},
 			expectedName:       "custom model",
 			expectedContext:    4096,
-			expectedOutput:     4096, // Default value
+			expectedOutput:     4096,
 			expectedInput:      []string{"text"},
 			expectedOutputMods: []string{"text"},
 			expectedToolCall:   false,
@@ -102,8 +102,8 @@ func TestGetModelConfig(t *testing.T) {
 			expectedName:       "minimal model",
 			expectedContext:    8192,
 			expectedOutput:     2048,
-			expectedInput:      []string{"text"}, // Default
-			expectedOutputMods: []string{"text"}, // Default
+			expectedInput:      []string{"text"},
+			expectedOutputMods: []string{"text"},
 			expectedToolCall:   false,
 		},
 		{
@@ -161,28 +161,27 @@ func TestGetModelConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := GetModelConfig(tt.model)
+			cfg := GetModelConfig(tt.model)
 
-			assert.Equal(t, tt.expectedName, config.Name, "model name should be last part after '/'")
-			assert.Equal(t, tt.expectedToolCall, config.ToolCall, "tool_call should match")
-			assert.Equal(t, tt.expectedContext, config.Limit.Context, "context limit should match")
-			assert.Equal(t, tt.expectedOutput, config.Limit.Output, "output limit should match")
-			assert.Equal(t, tt.expectedInput, config.Modalities.Input, "input modalities should match")
-			assert.Equal(t, tt.expectedOutputMods, config.Modalities.Output, "output modalities should match")
+			assert.Equal(t, tt.expectedName, cfg.Name, "model name should be last part after '/'")
+			assert.Equal(t, tt.expectedToolCall, cfg.ToolCall, "tool_call should match")
+			assert.Equal(t, tt.expectedContext, cfg.Limit.Context, "context limit should match")
+			assert.Equal(t, tt.expectedOutput, cfg.Limit.Output, "output limit should match")
+			assert.Equal(t, tt.expectedInput, cfg.Modalities.Input, "input modalities should match")
+			assert.Equal(t, tt.expectedOutputMods, cfg.Modalities.Output, "output modalities should match")
 		})
 	}
 }
 
 func TestGetModelConfig_NameExtraction(t *testing.T) {
-	// Test that model names extract the last part after the final "/" and replace hyphens with spaces
 	t.Run("model without slash has hyphens replaced", func(t *testing.T) {
 		model := types.Model{
 			ID:              "gpt-4",
 			InputModalities: []string{"text"},
 			ContextLength:   8192,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, "gpt 4", config.Name)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "gpt 4", cfg.Name)
 	})
 
 	t.Run("model with nvidia prefix extracts last part and replaces hyphens", func(t *testing.T) {
@@ -191,8 +190,8 @@ func TestGetModelConfig_NameExtraction(t *testing.T) {
 			InputModalities: []string{"text"},
 			ContextLength:   8192,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, "Kimi K2.5 NVFP4", config.Name)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "Kimi K2.5 NVFP4", cfg.Name)
 	})
 
 	t.Run("model with hf prefix and org extracts last part and replaces hyphens", func(t *testing.T) {
@@ -201,8 +200,8 @@ func TestGetModelConfig_NameExtraction(t *testing.T) {
 			InputModalities: []string{"text"},
 			ContextLength:   8192,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, "GLM 4.7 Flash", config.Name)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "GLM 4.7 Flash", cfg.Name)
 	})
 
 	t.Run("model with multiple slashes extracts last part and replaces hyphens", func(t *testing.T) {
@@ -211,8 +210,8 @@ func TestGetModelConfig_NameExtraction(t *testing.T) {
 			InputModalities: []string{"text"},
 			ContextLength:   8192,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, "model name", config.Name)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "model name", cfg.Name)
 	})
 
 	t.Run("model with MiniMax format", func(t *testing.T) {
@@ -221,8 +220,31 @@ func TestGetModelConfig_NameExtraction(t *testing.T) {
 			InputModalities: []string{"text"},
 			ContextLength:   8192,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, "MiniMax M2.5", config.Name)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "MiniMax M2.5", cfg.Name)
+	})
+
+	t.Run("prefers API name field over ID-derived name", func(t *testing.T) {
+		model := types.Model{
+			ID:              "syn:large:text",
+			Name:            "zai-org/GLM-5.2",
+			HuggingFaceID:   "zai-org/GLM-5.2",
+			InputModalities: []string{"text"},
+			ContextLength:   524288,
+		}
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "GLM 5.2", cfg.Name)
+	})
+
+	t.Run("falls back to hugging_face_id when no name", func(t *testing.T) {
+		model := types.Model{
+			ID:              "syn:small:text",
+			HuggingFaceID:   "zai-org/GLM-4.7-Flash",
+			InputModalities: []string{"text"},
+			ContextLength:   196608,
+		}
+		cfg := GetModelConfig(model)
+		assert.Equal(t, "GLM 4.7 Flash", cfg.Name)
 	})
 }
 
@@ -233,10 +255,10 @@ func TestGetModelConfig_CaseInsensitivity(t *testing.T) {
 			InputModalities: []string{"text", "image"},
 			ContextLength:   191488,
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, 191488, config.Limit.Context)
-		assert.Contains(t, config.Modalities.Input, "image")
-		assert.Contains(t, config.Modalities.Input, "text")
+		cfg := GetModelConfig(model)
+		assert.Equal(t, 191488, cfg.Limit.Context)
+		assert.Contains(t, cfg.Modalities.Input, "image")
+		assert.Contains(t, cfg.Modalities.Input, "text")
 	})
 
 	t.Run("large model with multimodal", func(t *testing.T) {
@@ -248,12 +270,194 @@ func TestGetModelConfig_CaseInsensitivity(t *testing.T) {
 			MaxOutputLength:   4096,
 			SupportedFeatures: []string{"tools"},
 		}
-		config := GetModelConfig(model)
-		assert.Equal(t, 128000, config.Limit.Context)
-		assert.Equal(t, 4096, config.Limit.Output)
-		assert.Contains(t, config.Modalities.Input, "image")
-		assert.True(t, config.ToolCall)
+		cfg := GetModelConfig(model)
+		assert.Equal(t, 128000, cfg.Limit.Context)
+		assert.Equal(t, 4096, cfg.Limit.Output)
+		assert.Contains(t, cfg.Modalities.Input, "image")
+		assert.True(t, cfg.ToolCall)
 	})
+
+	t.Run("tools feature matched case-insensitively", func(t *testing.T) {
+		model := types.Model{
+			ID:                "test-model",
+			InputModalities:   []string{"text"},
+			ContextLength:     8192,
+			SupportedFeatures: []string{"TOOLS"},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.ToolCall)
+	})
+
+	t.Run("reasoning feature detected", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:zai-org/GLM-5.2",
+			HuggingFaceID:     "zai-org/GLM-5.2",
+			InputModalities:   []string{"text"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		assert.True(t, cfg.ToolCall)
+	})
+}
+
+func TestGetModelConfig_Cost(t *testing.T) {
+	t.Run("pricing strings parsed to numeric cost", func(t *testing.T) {
+		model := types.Model{
+			ID:              "hf:zai-org/GLM-5.2",
+			HuggingFaceID:   "zai-org/GLM-5.2",
+			InputModalities: []string{"text"},
+			ContextLength:   524288,
+			MaxOutputLength: 65536,
+			Pricing: types.Pricing{
+				Prompt:           "$0.0000014",
+				Completion:       "$0.0000044",
+				InputCacheReads:  "$0.0000014",
+				InputCacheWrites: "0",
+			},
+		}
+		cfg := GetModelConfig(model)
+		require.NotNil(t, cfg.Cost)
+		assert.Equal(t, 0.0000014, cfg.Cost.Input)
+		assert.Equal(t, 0.0000044, cfg.Cost.Output)
+		assert.Equal(t, 0.0000014, cfg.Cost.CacheRead)
+		assert.Equal(t, float64(0), cfg.Cost.CacheWrite)
+	})
+
+	t.Run("zero pricing omitted", func(t *testing.T) {
+		model := types.Model{
+			ID:              "free-model",
+			InputModalities: []string{"text"},
+			ContextLength:   8192,
+			Pricing: types.Pricing{
+				Prompt:     "0",
+				Completion: "0",
+			},
+		}
+		cfg := GetModelConfig(model)
+		assert.Nil(t, cfg.Cost)
+	})
+}
+
+func TestGetModelConfig_Variants(t *testing.T) {
+	t.Run("GLM-5.2 gets variants from registry", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:zai-org/GLM-5.2",
+			HuggingFaceID:     "zai-org/GLM-5.2",
+			InputModalities:   []string{"text"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		require.NotNil(t, cfg.Variants)
+		assert.Contains(t, cfg.Variants, "none")
+		assert.Contains(t, cfg.Variants, "high")
+		assert.Contains(t, cfg.Variants, "max")
+		assert.Equal(t, "none", cfg.Variants["none"]["reasoningEffort"])
+		assert.Equal(t, "high", cfg.Variants["high"]["reasoningEffort"])
+		assert.Equal(t, "xhigh", cfg.Variants["max"]["reasoningEffort"])
+	})
+
+	t.Run("syn-style ID resolves variants via hugging_face_id", func(t *testing.T) {
+		model := types.Model{
+			ID:                "syn:large:text",
+			HuggingFaceID:     "zai-org/GLM-5.2",
+			Name:              "syn:large:text",
+			InputModalities:   []string{"text"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "reasoning"},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		require.NotNil(t, cfg.Variants)
+		assert.Contains(t, cfg.Variants, "none")
+		assert.Contains(t, cfg.Variants, "max")
+	})
+
+	t.Run("non-registered model gets no variants", func(t *testing.T) {
+		model := types.Model{
+			ID:                "gpt-4",
+			InputModalities:   []string{"text"},
+			ContextLength:     8192,
+			SupportedFeatures: []string{"tools"},
+		}
+		cfg := GetModelConfig(model)
+		assert.Nil(t, cfg.Variants)
+		assert.False(t, cfg.Reasoning)
+	})
+}
+
+func TestGetModelConfig_ContextDefault(t *testing.T) {
+	t.Run("zero context length gets default 8192", func(t *testing.T) {
+		model := types.Model{
+			ID:              "test-model",
+			InputModalities: []string{"text"},
+			ContextLength:   0,
+			MaxOutputLength: 4096,
+		}
+		cfg := GetModelConfig(model)
+		assert.Equal(t, 8192, cfg.Limit.Context)
+		assert.Equal(t, 4096, cfg.Limit.Output)
+	})
+}
+
+func TestOpencodeModelKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    types.Model
+		expected string
+	}{
+		{
+			name:     "hf prefix used as-is",
+			model:    types.Model{ID: "hf:zai-org/GLM-5.2"},
+			expected: "hf:zai-org/GLM-5.2",
+		},
+		{
+			name:     "syn ID with hugging_face_id gets hf prefix",
+			model:    types.Model{ID: "syn:large:text", HuggingFaceID: "zai-org/GLM-5.2"},
+			expected: "hf:zai-org/GLM-5.2",
+		},
+		{
+			name:     "bare ID without hugging_face_id stays as-is",
+			model:    types.Model{ID: "gpt-4"},
+			expected: "gpt-4",
+		},
+		{
+			name:     "org/model without hf prefix and no hugging_face_id stays as-is",
+			model:    types.Model{ID: "nvidia/Kimi-K2.5-NVFP4"},
+			expected: "nvidia/Kimi-K2.5-NVFP4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, OpencodeModelKey(tt.model))
+		})
+	}
+}
+
+// modelsFromJSON navigates the provider-wrapped JSON structure to extract the models map.
+func modelsFromJSON(t *testing.T, output string) map[string]interface{} {
+	t.Helper()
+	var result map[string]interface{}
+	err := json.Unmarshal([]byte(output), &result)
+	require.NoError(t, err, "output should be valid JSON")
+
+	provider, ok := result["provider"].(map[string]interface{})
+	require.True(t, ok, "should have provider key")
+
+	synthetic, ok := provider["synthetic"].(map[string]interface{})
+	require.True(t, ok, "should have synthetic provider")
+
+	modelsMap, ok := synthetic["models"].(map[string]interface{})
+	require.True(t, ok, "models should be a map")
+
+	return modelsMap
 }
 
 func TestGenerator_GenerateFromSelected(t *testing.T) {
@@ -348,16 +552,8 @@ func TestGenerator_GenerateFromSelected(t *testing.T) {
 
 			switch tt.format {
 			case FormatJSON:
-				// Verify valid JSON
-				var result map[string]interface{}
-				err = json.Unmarshal([]byte(output), &result)
-				require.NoError(t, err, "output should be valid JSON")
+				modelsMap := modelsFromJSON(t, output)
 
-				// Verify structure
-				modelsMap, ok := result["models"].(map[string]interface{})
-				require.True(t, ok, "models should be a map")
-
-				// Count selected models
 				selectedCount := 0
 				for _, m := range tt.models {
 					if m.Selected {
@@ -366,15 +562,13 @@ func TestGenerator_GenerateFromSelected(t *testing.T) {
 				}
 				assert.Len(t, modelsMap, selectedCount, "should have correct number of models")
 
-				// Verify each selected model is in the output
 				for _, m := range tt.models {
 					if m.Selected {
-						modelKey := m.Model.ID
+						modelKey := OpencodeModelKey(m.Model)
 						modelConfig, exists := modelsMap[modelKey]
 						require.True(t, exists, "model %s should exist in output", modelKey)
 						assert.NotNil(t, modelConfig)
 
-						// Verify model config structure
 						configMap, ok := modelConfig.(map[string]interface{})
 						require.True(t, ok, "model config should be a map")
 						assert.Contains(t, configMap, "name")
@@ -385,11 +579,10 @@ func TestGenerator_GenerateFromSelected(t *testing.T) {
 				}
 
 			case FormatYAML:
-				// Verify YAML-like output contains expected structure
 				assert.Contains(t, output, "models:")
 				for _, m := range tt.models {
 					if m.Selected {
-						modelKey := m.Model.ID
+						modelKey := OpencodeModelKey(m.Model)
 						assert.Contains(t, output, modelKey+":")
 					}
 				}
@@ -423,20 +616,11 @@ func TestGenerator_GenerateFromSelected_OutputStructure(t *testing.T) {
 	output, err := g.GenerateFromSelected(models)
 	require.NoError(t, err)
 
-	// Parse the JSON output
-	var result map[string]interface{}
-	err = json.Unmarshal([]byte(output), &result)
-	require.NoError(t, err)
+	modelsMap := modelsFromJSON(t, output)
 
-	// Verify top-level structure
-	modelsMap, ok := result["models"].(map[string]interface{})
-	require.True(t, ok)
-
-	// Verify the model config structure
 	visionConfig, ok := modelsMap["vision-model"].(map[string]interface{})
 	require.True(t, ok)
 
-	// Check all required fields
 	assert.Equal(t, "vision model", visionConfig["name"])
 	assert.Equal(t, true, visionConfig["tool_call"])
 
@@ -450,7 +634,6 @@ func TestGenerator_GenerateFromSelected_OutputStructure(t *testing.T) {
 	assert.Contains(t, modalities, "input")
 	assert.Contains(t, modalities, "output")
 
-	// Should have image input based on actual API data
 	inputModalities, ok := modalities["input"].([]interface{})
 	require.True(t, ok)
 	assert.Contains(t, inputModalities, "text")
@@ -478,11 +661,7 @@ func TestGenerator_GenerateFromSelected_LargeModelLimits(t *testing.T) {
 	output, err := g.GenerateFromSelected(models)
 	require.NoError(t, err)
 
-	var result map[string]interface{}
-	err = json.Unmarshal([]byte(output), &result)
-	require.NoError(t, err)
-
-	modelsMap := result["models"].(map[string]interface{})
+	modelsMap := modelsFromJSON(t, output)
 	modelConfig := modelsMap["nvidia/llama-3.2-m2.5-32k"].(map[string]interface{})
 	limits := modelConfig["limit"].(map[string]interface{})
 
@@ -508,16 +687,77 @@ func TestGenerator_GenerateFromSelected_SmallModelLimits(t *testing.T) {
 	output, err := g.GenerateFromSelected(models)
 	require.NoError(t, err)
 
-	var result map[string]interface{}
-	err = json.Unmarshal([]byte(output), &result)
-	require.NoError(t, err)
-
-	modelsMap := result["models"].(map[string]interface{})
+	modelsMap := modelsFromJSON(t, output)
 	modelConfig := modelsMap["gpt-3.5-turbo"].(map[string]interface{})
 	limits := modelConfig["limit"].(map[string]interface{})
 
 	assert.Equal(t, float64(8192), limits["context"])
 	assert.Equal(t, float64(4096), limits["output"])
+}
+
+func TestGenerator_GenerateFromSelected_CostInOutput(t *testing.T) {
+	g := NewGenerator(FormatJSON)
+	models := []types.SelectedModel{
+		{
+			Model: types.Model{
+				ID:              "hf:zai-org/GLM-5.2",
+				HuggingFaceID:   "zai-org/GLM-5.2",
+				InputModalities: []string{"text"},
+				ContextLength:   524288,
+				MaxOutputLength: 65536,
+				Pricing: types.Pricing{
+					Prompt:     "$0.0000014",
+					Completion: "$0.0000044",
+				},
+			},
+			Selected: true,
+		},
+	}
+
+	output, err := g.GenerateFromSelected(models)
+	require.NoError(t, err)
+
+	modelsMap := modelsFromJSON(t, output)
+	modelConfig := modelsMap["hf:zai-org/GLM-5.2"].(map[string]interface{})
+
+	cost, ok := modelConfig["cost"].(map[string]interface{})
+	require.True(t, ok, "should have cost field")
+	assert.Equal(t, 0.0000014, cost["input"])
+	assert.Equal(t, 0.0000044, cost["output"])
+
+	_, hasPricing := modelConfig["pricing"]
+	assert.False(t, hasPricing, "should not have legacy pricing field")
+}
+
+func TestGenerator_GenerateFromSelected_VariantsInOutput(t *testing.T) {
+	g := NewGenerator(FormatJSON)
+	models := []types.SelectedModel{
+		{
+			Model: types.Model{
+				ID:                "hf:zai-org/GLM-5.2",
+				HuggingFaceID:     "zai-org/GLM-5.2",
+				InputModalities:   []string{"text"},
+				ContextLength:     524288,
+				MaxOutputLength:   65536,
+				SupportedFeatures: []string{"tools", "reasoning"},
+			},
+			Selected: true,
+		},
+	}
+
+	output, err := g.GenerateFromSelected(models)
+	require.NoError(t, err)
+
+	modelsMap := modelsFromJSON(t, output)
+	modelConfig := modelsMap["hf:zai-org/GLM-5.2"].(map[string]interface{})
+
+	assert.Equal(t, true, modelConfig["reasoning"])
+
+	variants, ok := modelConfig["variants"].(map[string]interface{})
+	require.True(t, ok, "should have variants field")
+	assert.Contains(t, variants, "none")
+	assert.Contains(t, variants, "high")
+	assert.Contains(t, variants, "max")
 }
 
 func TestGenerator_GenerateFromSelected_UnsupportedFormat(t *testing.T) {
@@ -538,8 +778,17 @@ func TestNewGenerator(t *testing.T) {
 	g := NewGenerator(FormatJSON)
 	require.NotNil(t, g)
 	assert.Equal(t, FormatJSON, g.format)
+	assert.Equal(t, defaultBaseURL, g.baseURL)
 
 	g2 := NewGenerator(FormatYAML)
 	require.NotNil(t, g2)
 	assert.Equal(t, FormatYAML, g2.format)
+}
+
+func TestNewGenerator_WithBaseURL(t *testing.T) {
+	g := NewGenerator(FormatJSON).WithBaseURL("https://custom.example.com/v1")
+	assert.Equal(t, "https://custom.example.com/v1", g.baseURL)
+
+	g2 := NewGenerator(FormatJSON).WithBaseURL("")
+	assert.Equal(t, defaultBaseURL, g2.baseURL)
 }
