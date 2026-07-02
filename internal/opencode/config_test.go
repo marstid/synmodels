@@ -704,3 +704,70 @@ func TestManager_Read_NilProvidersMap(t *testing.T) {
 	// provider would be nil, GetProviders returns empty map
 	assert.Empty(t, cfg.GetProviders())
 }
+
+func TestManager_Write_BackupPermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ConfigFilename)
+
+	// Write initial config
+	initialConfig := map[string]interface{}{
+		"$schema": "./schema.json",
+		"provider": map[string]interface{}{
+			"synthetic": map[string]interface{}{
+				"models": map[string]interface{}{},
+			},
+		},
+	}
+	initialData, err := json.MarshalIndent(initialConfig, "", "  ")
+	require.NoError(t, err)
+	err = os.WriteFile(configPath, initialData, 0o644)
+	require.NoError(t, err)
+
+	// Write new config to trigger a backup
+	newConfig := &Config{
+		data: map[string]interface{}{
+			"provider": map[string]interface{}{
+				"synthetic": map[string]interface{}{
+					"npm":    "@ai-sdk/openai-compatible",
+					"name":   "Synthetic",
+					"models": map[string]interface{}{},
+				},
+			},
+		},
+	}
+
+	m := NewManagerWithPath(configPath)
+	err = m.Write(newConfig)
+	require.NoError(t, err)
+
+	// Find the backup file and check its permissions
+	entries, err := os.ReadDir(tmpDir)
+	require.NoError(t, err)
+
+	var backupFound bool
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), BackupSuffix) {
+			backupFound = true
+			info, err := os.Stat(filepath.Join(tmpDir, entry.Name()))
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			break
+		}
+	}
+	assert.True(t, backupFound, "Backup file should be created")
+}
+
+func TestManager_CheckConfigStatus_UnreadableConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ConfigFilename)
+
+	// Write invalid JSON to the config file
+	err := os.WriteFile(configPath, []byte("{invalid json}"), 0o644)
+	require.NoError(t, err)
+
+	m := NewManagerWithPath(configPath)
+	status := m.CheckConfigStatus()
+
+	assert.Equal(t, ConfigUnreadable, status)
+	assert.NotEqual(t, ConfigExistsNoProvider, status)
+}

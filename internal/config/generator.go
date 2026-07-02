@@ -4,10 +4,15 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/marstid/synmodels/internal/types"
+	"github.com/marstid/synmodels/internal/variants"
 )
+
+const defaultBaseURL = "https://api.synthetic.new/openai/v1"
 
 // OutputFormat represents the format of the generated config.
 type OutputFormat string
@@ -21,14 +26,41 @@ const (
 
 // Generator creates configuration output from selected models.
 type Generator struct {
-	format OutputFormat
+	format  OutputFormat
+	baseURL string
+	apiKey  string
 }
 
 // NewGenerator creates a new config generator with the specified format.
 func NewGenerator(format OutputFormat) *Generator {
 	return &Generator{
-		format: format,
+		format:  format,
+		baseURL: defaultBaseURL,
 	}
+}
+
+// WithBaseURL sets the provider base URL to include in the generated config preview.
+func (g *Generator) WithBaseURL(baseURL string) *Generator {
+	if baseURL != "" {
+		g.baseURL = baseURL
+	}
+	return g
+}
+
+// WithAPIKey sets the API key to use in the generated config preview.
+// When non-empty, the key value is used directly. When empty, the placeholder
+// text "SYNTHETIC_API_KEY" is shown instead.
+func (g *Generator) WithAPIKey(apiKey string) *Generator {
+	g.apiKey = apiKey
+	return g
+}
+
+// apiKeyLabel returns the preview label for the API key.
+func (g *Generator) apiKeyLabel() string {
+	if g.apiKey != "" {
+		return g.apiKey
+	}
+	return "SYNTHETIC_API_KEY"
 }
 
 // Generate creates a configuration string from the selected models.
@@ -70,21 +102,24 @@ func (g *Generator) Generate(models []types.Model) (string, error) {
 
 // ModelConfig represents the configuration for a single model.
 type ModelConfig struct {
-	Name       string          `json:"name"`
-	ToolCall   bool            `json:"tool_call"`
-	Limit      ModelLimits     `json:"limit"`
-	Modalities ModelModalities `json:"modalities"`
-	Pricing    PricingInfo     `json:"pricing,omitempty"`
+	Name        string                    `json:"name,omitempty"`
+	Reasoning   bool                      `json:"reasoning,omitempty"`
+	ToolCall    bool                      `json:"tool_call"`
+	Interleaved any                       `json:"interleaved,omitempty"`
+	Limit       ModelLimits               `json:"limit"`
+	Modalities  ModelModalities           `json:"modalities"`
+	Cost        *CostInfo                 `json:"cost,omitempty"`
+	Options     map[string]any            `json:"options,omitempty"`
+	Variants    map[string]map[string]any `json:"variants,omitempty"`
 }
 
-// PricingInfo represents the pricing information for a model configuration.
-type PricingInfo struct {
-	Prompt           string `json:"prompt,omitempty"`
-	Completion       string `json:"completion,omitempty"`
-	Image            string `json:"image,omitempty"`
-	Request          string `json:"request,omitempty"`
-	InputCacheReads  string `json:"input_cache_reads,omitempty"`
-	InputCacheWrites string `json:"input_cache_writes,omitempty"`
+// CostInfo represents the cost information for a model configuration.
+// Fields use numeric values per the opencode config schema (not string prices).
+type CostInfo struct {
+	Input      float64 `json:"input,omitempty"`
+	Output     float64 `json:"output,omitempty"`
+	CacheRead  float64 `json:"cache_read,omitempty"`
+	CacheWrite float64 `json:"cache_write,omitempty"`
 }
 
 // ModelLimits represents the context and output token limits.
@@ -99,48 +134,95 @@ type ModelModalities struct {
 	Output []string `json:"output"`
 }
 
-// GetModelConfig generates a ModelConfig from actual API data.
-func GetModelConfig(model types.Model) ModelConfig {
-	// Use actual API data for context limit
-	contextLimit := model.ContextLength
-
-	// Use actual API data for output limit, with default fallback
-	outputLimit := model.MaxOutputLength
-	if outputLimit == 0 {
-		outputLimit = 4096 // Default output limit if not specified
+// OpencodeModelKey derives the opencode model key from a model's API data.
+// If the ID already starts with "hf:", it is used as-is.
+// Otherwise, if hugging_face_id is non-empty, "hf:" + hugging_face_id is used.
+// Otherwise, the raw ID is returned (no blind "hf:" prefix).
+func OpencodeModelKey(model types.Model) string {
+	if strings.HasPrefix(model.ID, "hf:") {
+		return model.ID
 	}
-
-	// Use actual API data for input modalities
-	inputModalities := model.InputModalities
-	if len(inputModalities) == 0 {
-		inputModalities = []string{"text"} // Default to text only if not specified
+	if model.HuggingFaceID != "" {
+		return "hf:" + model.HuggingFaceID
 	}
+	return model.ID
+}
 
-	// Use actual API data for output modalities
-	outputModalities := model.OutputModalities
-	if len(outputModalities) == 0 {
-		outputModalities = []string{"text"} // Default to text only if not specified
+// parsePrice converts a pricing string like "$0.0000014" or "0" to a float64.
+func parsePrice(s string) float64 {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "$")
+	if s == "" || s == "0" {
+		return 0
 	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
 
-	// Check if tools feature is supported
-	toolCall := false
-	for _, feature := range model.SupportedFeatures {
-		if feature == "tools" {
-			toolCall = true
-			break
+// hasFeature checks if a feature is in the supported features list (case-insensitive).
+func hasFeature(features []string, feature string) bool {
+	for _, f := range features {
+		if strings.EqualFold(f, feature) {
+			return true
 		}
 	}
+	return false
+}
 
-	// Extract the last part of the model ID for the name
-	// e.g., "hf:zai-org/GLM-4.7-Flash" -> "GLM 4.7 Flash"
-	// e.g., "nvidia/Kimi-K2.5-NVFP4" -> "Kimi K2.5 NVFP4"
-	parts := strings.Split(model.ID, "/")
+// extractModelName derives a human-friendly name from the model's API data.
+// Prefers the API-provided name field, falling back to deriving from the ID.
+func extractModelName(model types.Model) string {
+	if model.Name != "" {
+		parts := strings.Split(model.Name, "/")
+		name := parts[len(parts)-1]
+		return strings.ReplaceAll(name, "-", " ")
+	}
+	id := model.ID
+	id = strings.TrimPrefix(id, "hf:")
+	id = strings.TrimPrefix(id, "syn:")
+	if model.HuggingFaceID != "" {
+		hfParts := strings.Split(model.HuggingFaceID, "/")
+		if len(hfParts) > 0 {
+			return strings.ReplaceAll(hfParts[len(hfParts)-1], "-", " ")
+		}
+	}
+	parts := strings.Split(id, "/")
 	name := parts[len(parts)-1]
-	name = strings.ReplaceAll(name, "-", " ")
+	return strings.ReplaceAll(name, "-", " ")
+}
 
-	return ModelConfig{
-		Name:     name,
-		ToolCall: toolCall,
+// GetModelConfig generates a ModelConfig from actual API data.
+func GetModelConfig(model types.Model) ModelConfig {
+	contextLimit := model.ContextLength
+	if contextLimit == 0 {
+		contextLimit = 8192
+	}
+
+	outputLimit := model.MaxOutputLength
+	if outputLimit == 0 {
+		outputLimit = 4096
+	}
+
+	inputModalities := model.InputModalities
+	if len(inputModalities) == 0 {
+		inputModalities = []string{"text"}
+	}
+
+	outputModalities := model.OutputModalities
+	if len(outputModalities) == 0 {
+		outputModalities = []string{"text"}
+	}
+
+	toolCall := hasFeature(model.SupportedFeatures, "tools")
+	reasoning := hasFeature(model.SupportedFeatures, "reasoning")
+
+	cfg := ModelConfig{
+		Name:      extractModelName(model),
+		Reasoning: reasoning,
+		ToolCall:  toolCall,
 		Limit: ModelLimits{
 			Context: contextLimit,
 			Output:  outputLimit,
@@ -149,15 +231,35 @@ func GetModelConfig(model types.Model) ModelConfig {
 			Input:  inputModalities,
 			Output: outputModalities,
 		},
-		Pricing: PricingInfo{
-			Prompt:           model.Pricing.Prompt,
-			Completion:       model.Pricing.Completion,
-			Image:            model.Pricing.Image,
-			Request:          model.Pricing.Request,
-			InputCacheReads:  model.Pricing.InputCacheReads,
-			InputCacheWrites: model.Pricing.InputCacheWrites,
-		},
 	}
+
+	cost := &CostInfo{
+		Input:      parsePrice(model.Pricing.Prompt),
+		Output:     parsePrice(model.Pricing.Completion),
+		CacheRead:  parsePrice(model.Pricing.InputCacheReads),
+		CacheWrite: parsePrice(model.Pricing.InputCacheWrites),
+	}
+	if cost.Input != 0 || cost.Output != 0 || cost.CacheRead != 0 || cost.CacheWrite != 0 {
+		cfg.Cost = cost
+	}
+
+	key := OpencodeModelKey(model)
+	if spec, ok := variants.Lookup(key); ok {
+		if spec.Reasoning {
+			cfg.Reasoning = true
+		}
+		if spec.Interleaved != nil {
+			cfg.Interleaved = spec.Interleaved
+		}
+		if len(spec.Variants) > 0 {
+			cfg.Variants = spec.Variants
+		}
+		if len(spec.Options) > 0 {
+			cfg.Options = spec.Options
+		}
+	}
+
+	return cfg
 }
 
 // GenerateFromSelected generates config from a list of SelectedModel.
@@ -173,43 +275,116 @@ func (g *Generator) GenerateFromSelected(selectedModels []types.SelectedModel) (
 		return "", fmt.Errorf("no models selected")
 	}
 
-	// Build models map with detailed config for each model
 	modelsMap := make(map[string]ModelConfig)
 	for _, model := range selected {
-		modelsMap[model.ID] = GetModelConfig(model)
+		modelsMap[OpencodeModelKey(model)] = GetModelConfig(model)
 	}
 
-	// Create the final config structure
-	config := map[string]interface{}{
-		"models": modelsMap,
+	providerConfig := map[string]interface{}{
+		"provider": map[string]interface{}{
+			"synthetic": map[string]interface{}{
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": "Synthetic",
+				"options": map[string]interface{}{
+					"baseURL": g.baseURL,
+					"apiKey":  g.apiKeyLabel(),
+				},
+				"models": modelsMap,
+			},
+		},
 	}
 
 	switch g.format {
 	case FormatJSON:
-		data, err := json.MarshalIndent(config, "", "  ")
+		data, err := json.MarshalIndent(providerConfig, "", "  ")
 		if err != nil {
 			return "", fmt.Errorf("failed to marshal config: %w", err)
 		}
 		return string(data), nil
 	case FormatYAML:
-		// Simple YAML-like output
-		var sb strings.Builder
-		sb.WriteString("models:\n")
-		for id, cfg := range modelsMap {
-			sb.WriteString(fmt.Sprintf("  %s:\n", id))
-			sb.WriteString(fmt.Sprintf("    name: %s\n", cfg.Name))
-			sb.WriteString(fmt.Sprintf("    tool_call: %t\n", cfg.ToolCall))
-			sb.WriteString("    limit:\n")
-			sb.WriteString(fmt.Sprintf("      context: %d\n", cfg.Limit.Context))
-			sb.WriteString(fmt.Sprintf("      output: %d\n", cfg.Limit.Output))
-			sb.WriteString("    modalities:\n")
-			sb.WriteString(fmt.Sprintf("      input: %v\n", cfg.Modalities.Input))
-			sb.WriteString(fmt.Sprintf("      output: %v\n", cfg.Modalities.Output))
-		}
-		return sb.String(), nil
+		return g.marshalYAML(modelsMap), nil
 	default:
 		return "", fmt.Errorf("unsupported format: %s", g.format)
 	}
+}
+
+// yamlKey quotes a YAML key if it contains characters that require quoting.
+func yamlKey(k string) string {
+	if strings.ContainsAny(k, ":#{}[]&*!|>'\"%@`") {
+		return fmt.Sprintf("%q", k)
+	}
+	return k
+}
+
+// marshalYAML produces a simple YAML-like representation of the full provider config.
+func (g *Generator) marshalYAML(modelsMap map[string]ModelConfig) string {
+	var sb strings.Builder
+	sb.WriteString("provider:\n")
+	sb.WriteString("  synthetic:\n")
+	sb.WriteString("    npm: @ai-sdk/openai-compatible\n")
+	sb.WriteString("    name: Synthetic\n")
+	sb.WriteString("    options:\n")
+	sb.WriteString(fmt.Sprintf("      baseURL: %s\n", g.baseURL))
+	sb.WriteString(fmt.Sprintf("      apiKey: %s\n", g.apiKeyLabel()))
+	sb.WriteString("    models:\n")
+
+	keys := make([]string, 0, len(modelsMap))
+	for k := range modelsMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, id := range keys {
+		cfg := modelsMap[id]
+		sb.WriteString(fmt.Sprintf("      %s:\n", yamlKey(id)))
+		sb.WriteString(fmt.Sprintf("        name: %s\n", cfg.Name))
+		if cfg.Reasoning {
+			sb.WriteString("        reasoning: true\n")
+		}
+		sb.WriteString(fmt.Sprintf("        tool_call: %t\n", cfg.ToolCall))
+		sb.WriteString("        limit:\n")
+		sb.WriteString(fmt.Sprintf("          context: %d\n", cfg.Limit.Context))
+		sb.WriteString(fmt.Sprintf("          output: %d\n", cfg.Limit.Output))
+		sb.WriteString("        modalities:\n")
+		sb.WriteString(fmt.Sprintf("          input: [%s]\n", strings.Join(cfg.Modalities.Input, ", ")))
+		sb.WriteString(fmt.Sprintf("          output: [%s]\n", strings.Join(cfg.Modalities.Output, ", ")))
+		if cfg.Cost != nil {
+			sb.WriteString("        cost:\n")
+			if cfg.Cost.Input != 0 {
+				sb.WriteString(fmt.Sprintf("          input: %g\n", cfg.Cost.Input))
+			}
+			if cfg.Cost.Output != 0 {
+				sb.WriteString(fmt.Sprintf("          output: %g\n", cfg.Cost.Output))
+			}
+			if cfg.Cost.CacheRead != 0 {
+				sb.WriteString(fmt.Sprintf("          cache_read: %g\n", cfg.Cost.CacheRead))
+			}
+			if cfg.Cost.CacheWrite != 0 {
+				sb.WriteString(fmt.Sprintf("          cache_write: %g\n", cfg.Cost.CacheWrite))
+			}
+		}
+		if len(cfg.Variants) > 0 {
+			sb.WriteString("        variants:\n")
+			variantNames := make([]string, 0, len(cfg.Variants))
+			for v := range cfg.Variants {
+				variantNames = append(variantNames, v)
+			}
+			sort.Strings(variantNames)
+			for _, vname := range variantNames {
+				sb.WriteString(fmt.Sprintf("          %s:\n", vname))
+				optKeys := make([]string, 0, len(cfg.Variants[vname]))
+				for k := range cfg.Variants[vname] {
+					optKeys = append(optKeys, k)
+				}
+				sort.Strings(optKeys)
+				for _, ok := range optKeys {
+					sb.WriteString(fmt.Sprintf("            %s: %v\n", ok, cfg.Variants[vname][ok]))
+				}
+			}
+		}
+	}
+
+	return sb.String()
 }
 
 // DefaultConfig returns a default config structure with the given model IDs.
