@@ -29,6 +29,15 @@ var registry = map[string]Spec{
 			"max":  {"reasoningEffort": "xhigh"},
 		},
 	},
+	"hf:moonshotai/Kimi-K3": {
+		Reasoning:   true,
+		Interleaved: map[string]any{"field": "reasoning_content"},
+		Variants: map[string]map[string]any{
+			"low":  {"reasoningEffort": "low"},
+			"high": {"reasoningEffort": "high"},
+			"max":  {"reasoningEffort": "xhigh"},
+		},
+	},
 }
 
 // Lookup returns the variant spec for the given opencode model key, if one exists.
