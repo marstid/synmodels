@@ -342,7 +342,7 @@ func TestGetModelConfig_Cost(t *testing.T) {
 }
 
 func TestGetModelConfig_Variants(t *testing.T) {
-	t.Run("GLM-5.2 gets variants from registry", func(t *testing.T) {
+	t.Run("GLM-5.2 gets variants from reasoning_parameters.efforts", func(t *testing.T) {
 		model := types.Model{
 			ID:                "hf:zai-org/GLM-5.2",
 			HuggingFaceID:     "zai-org/GLM-5.2",
@@ -350,6 +350,9 @@ func TestGetModelConfig_Variants(t *testing.T) {
 			ContextLength:     524288,
 			MaxOutputLength:   65536,
 			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+			ReasoningParameters: types.ReasoningParameters{
+				Efforts: []string{"none", "high", "max"},
+			},
 		}
 		cfg := GetModelConfig(model)
 		assert.True(t, cfg.Reasoning)
@@ -362,7 +365,7 @@ func TestGetModelConfig_Variants(t *testing.T) {
 		assert.Equal(t, "xhigh", cfg.Variants["max"]["reasoningEffort"])
 	})
 
-	t.Run("syn-style ID resolves variants via hugging_face_id", func(t *testing.T) {
+	t.Run("syn-style ID resolves variants via hugging_face_id efforts", func(t *testing.T) {
 		model := types.Model{
 			ID:                "syn:large:text",
 			HuggingFaceID:     "zai-org/GLM-5.2",
@@ -371,12 +374,92 @@ func TestGetModelConfig_Variants(t *testing.T) {
 			ContextLength:     524288,
 			MaxOutputLength:   65536,
 			SupportedFeatures: []string{"tools", "reasoning"},
+			ReasoningParameters: types.ReasoningParameters{
+				Efforts: []string{"none", "high", "max"},
+			},
 		}
 		cfg := GetModelConfig(model)
 		assert.True(t, cfg.Reasoning)
 		require.NotNil(t, cfg.Variants)
 		assert.Contains(t, cfg.Variants, "none")
 		assert.Contains(t, cfg.Variants, "max")
+	})
+
+	t.Run("GLM-5.3-Flash gets variants dynamically without registry entry", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:zai-org/GLM-5.3-Flash",
+			HuggingFaceID:     "zai-org/GLM-5.3-Flash",
+			InputModalities:   []string{"text", "image"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+			ReasoningParameters: types.ReasoningParameters{
+				Efforts: []string{"low", "high", "max"},
+			},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		require.NotNil(t, cfg.Variants)
+		assert.Contains(t, cfg.Variants, "low")
+		assert.Contains(t, cfg.Variants, "high")
+		assert.Contains(t, cfg.Variants, "max")
+		assert.Equal(t, "low", cfg.Variants["low"]["reasoningEffort"])
+		assert.Equal(t, "high", cfg.Variants["high"]["reasoningEffort"])
+		assert.Equal(t, "xhigh", cfg.Variants["max"]["reasoningEffort"])
+	})
+
+	t.Run("xhigh effort passes through unchanged", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:Qwen/Qwen3.8-27B",
+			HuggingFaceID:     "Qwen/Qwen3.8-27B",
+			InputModalities:   []string{"text", "image"},
+			ContextLength:     262144,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+			ReasoningParameters: types.ReasoningParameters{
+				Efforts: []string{"low", "medium", "xhigh"},
+			},
+		}
+		cfg := GetModelConfig(model)
+		require.NotNil(t, cfg.Variants)
+		assert.Equal(t, "xhigh", cfg.Variants["xhigh"]["reasoningEffort"])
+		assert.Equal(t, "medium", cfg.Variants["medium"]["reasoningEffort"])
+	})
+
+	t.Run("reasoning model with empty efforts gets no variants", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:zai-org/GLM-5.2",
+			HuggingFaceID:     "zai-org/GLM-5.2",
+			InputModalities:   []string{"text"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "reasoning"},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		assert.Nil(t, cfg.Variants)
+	})
+
+	t.Run("Kimi-K3 gets dynamic variants plus interleaved override from registry", func(t *testing.T) {
+		model := types.Model{
+			ID:                "hf:moonshotai/Kimi-K3",
+			HuggingFaceID:     "moonshotai/Kimi-K3",
+			InputModalities:   []string{"text", "image"},
+			ContextLength:     524288,
+			MaxOutputLength:   65536,
+			SupportedFeatures: []string{"tools", "json_mode", "structured_outputs", "reasoning"},
+			ReasoningParameters: types.ReasoningParameters{
+				Efforts: []string{"low", "high", "max"},
+			},
+		}
+		cfg := GetModelConfig(model)
+		assert.True(t, cfg.Reasoning)
+		require.NotNil(t, cfg.Variants)
+		assert.Contains(t, cfg.Variants, "low")
+		assert.Contains(t, cfg.Variants, "high")
+		assert.Contains(t, cfg.Variants, "max")
+		assert.Equal(t, "xhigh", cfg.Variants["max"]["reasoningEffort"])
+		assert.Equal(t, map[string]any{"field": "reasoning_content"}, cfg.Interleaved)
 	})
 
 	t.Run("non-registered model gets no variants", func(t *testing.T) {
@@ -740,6 +823,9 @@ func TestGenerator_GenerateFromSelected_VariantsInOutput(t *testing.T) {
 				ContextLength:     524288,
 				MaxOutputLength:   65536,
 				SupportedFeatures: []string{"tools", "reasoning"},
+				ReasoningParameters: types.ReasoningParameters{
+					Efforts: []string{"none", "high", "max"},
+				},
 			},
 			Selected: true,
 		},

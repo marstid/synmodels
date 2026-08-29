@@ -17,7 +17,7 @@ synmodel is a command-line application that:
 - Generates opencode-compatible config with:
   - `cost` (numeric input/output/cache pricing)
   - `reasoning` flag for reasoning-capable models (detected from `supported_features`)
-  - `variants` presets for reasoning models (e.g. GLM-5.2: `none`/`high`/`max` → `reasoningEffort`)
+  - `variants` presets generated dynamically from the API's `reasoning_parameters.efforts` field (e.g. GLM-5.2: `none`/`high`/`max` → `reasoningEffort`, with `max` mapping to `xhigh`)
   - `tool_call`, `limit`, `modalities` from real API data
 - Writes directly to `opencode.json` with atomic writes, timestamped backups, and full field preservation (your existing config, MCP servers, other providers, etc. are kept)
 - Secure: config and backups written with `0600` permissions; config directory `0700`
@@ -64,19 +64,16 @@ This will:
 
 ## Variant Support
 
-Some reasoning models (e.g. GLM-5.2) support adjustable reasoning effort levels. synmodel emits `variants` presets in the opencode config so you can switch between them in opencode's model picker.
+Reasoning models expose their supported effort levels via the API's `reasoning_parameters.efforts` field (e.g. `["none","high","max"]`). synmodel emits a `variants` preset for each effort level in the opencode config, so you can switch between them in opencode's model picker. Each variant sets a `reasoningEffort` request option; the `max` effort maps to opencode's `xhigh` value.
 
-Variant definitions live in a built-in registry (`internal/variants/registry.go`), since the Synthetic API does not expose variant presets. To add support for a new reasoning model, add a single entry to the registry:
+Variant generation is automatic — any reasoning model the API returns with efforts gets variants with no code changes.
+
+A small built-in registry (`internal/variants/registry.go`) holds per-model overrides that the API does not expose. Currently the only such override is `interleaved`, which tells opencode how to parse interleaved reasoning from streaming responses (e.g. Kimi-K3 emits it in a `reasoning_content` field). To add an override for a new model, add a single entry to the registry:
 
 ```go
 var registry = map[string]Spec{
-    "hf:zai-org/GLM-5.2": {
-        Reasoning: true,
-        Variants: map[string]map[string]any{
-            "none": {"reasoningEffort": "none"},
-            "high": {"reasoningEffort": "high"},
-            "max":  {"reasoningEffort": "xhigh"},
-        },
+    "hf:moonshotai/Kimi-K3": {
+        Interleaved: map[string]any{"field": "reasoning_content"},
     },
 }
 ```

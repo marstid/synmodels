@@ -1,0 +1,260 @@
+{
+  "provider": {
+    "synthetic": {
+      "models": {
+        "hf:Qwen/Qwen3.8-27B": {
+          "name": "Qwen3.8 27B",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 262144,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 4.5e-7,
+            "output": 0.0000022,
+            "cache_read": 9e-8
+          },
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        },
+        "hf:moonshotai/Kimi-K3": {
+          "name": "Kimi K3",
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "limit": {
+            "context": 524288,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 0.000003,
+            "output": 0.000015,
+            "cache_read": 4.5e-7
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "max": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        },
+        "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4": {
+          "name": "NVIDIA Nemotron 3 Super 120B A12B NVFP4",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 262144,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 3e-7,
+            "output": 0.000001,
+            "cache_read": 6e-8
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "none": {
+              "reasoningEffort": "none"
+            }
+          }
+        },
+        "hf:openai/gpt-oss-120b": {
+          "name": "gpt oss 120b",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 131072,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 1e-7,
+            "output": 1e-7,
+            "cache_read": 2e-8
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "none": {
+              "reasoningEffort": "none"
+            }
+          }
+        },
+        "hf:zai-org/GLM-4.7-Flash": {
+          "name": "GLM 4.7 Flash",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 196608,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 1e-7,
+            "output": 5e-7,
+            "cache_read": 2e-8
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "none": {
+              "reasoningEffort": "none"
+            }
+          }
+        },
+        "hf:zai-org/GLM-5.2": {
+          "name": "GLM 5.2",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 524288,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 0.000001,
+            "output": 0.000003,
+            "cache_read": 1.6e-7
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "max": {
+              "reasoningEffort": "xhigh"
+            },
+            "none": {
+              "reasoningEffort": "none"
+            }
+          }
+        },
+        "hf:zai-org/GLM-5.3-Flash": {
+          "name": "GLM 5.3 Flash",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 524288,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "cost": {
+            "input": 1.5e-7,
+            "output": 5e-7,
+            "cache_read": 4e-8
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            },
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "max": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        }
+      },
+      "name": "Synthetic",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "SYNTHETIC_API_KEY",
+        "baseURL": "https://api.synthetic.new/openai/v1"
+      }
+    }
+  }
+}

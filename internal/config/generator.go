@@ -92,7 +92,7 @@ func (g *Generator) Generate(models []types.Model) (string, error) {
 		var sb strings.Builder
 		sb.WriteString("models:\n")
 		for _, id := range modelIDs {
-			sb.WriteString(fmt.Sprintf("  - %s\n", id))
+			fmt.Fprintf(&sb, "  - %s\n", id)
 		}
 		return sb.String(), nil
 	default:
@@ -194,6 +194,31 @@ func extractModelName(model types.Model) string {
 	return strings.ReplaceAll(name, "-", " ")
 }
 
+// mapEffort translates an API reasoning effort level to the opencode
+// reasoningEffort value. "max" maps to "xhigh"; all other efforts pass
+// through unchanged.
+func mapEffort(effort string) string {
+	if effort == "max" {
+		return "xhigh"
+	}
+	return effort
+}
+
+// variantsFromEfforts builds opencode variant presets from the model's
+// reasoning_parameters.efforts. Each effort becomes a variant keyed by its
+// own name with a reasoningEffort request option. Returns nil when efforts is
+// empty or the model is not a reasoning model.
+func variantsFromEfforts(model types.Model, reasoning bool) map[string]map[string]any {
+	if !reasoning || len(model.ReasoningParameters.Efforts) == 0 {
+		return nil
+	}
+	variants := make(map[string]map[string]any, len(model.ReasoningParameters.Efforts))
+	for _, effort := range model.ReasoningParameters.Efforts {
+		variants[effort] = map[string]any{"reasoningEffort": mapEffort(effort)}
+	}
+	return variants
+}
+
 // GetModelConfig generates a ModelConfig from actual API data.
 func GetModelConfig(model types.Model) ModelConfig {
 	contextLimit := model.ContextLength
@@ -244,6 +269,13 @@ func GetModelConfig(model types.Model) ModelConfig {
 	}
 
 	key := OpencodeModelKey(model)
+
+	// Generate variant presets dynamically from reasoning_parameters.efforts.
+	cfg.Variants = variantsFromEfforts(model, reasoning)
+
+	// Apply per-model overrides from the registry. The registry provides
+	// values the API does not expose (e.g. interleaved for Kimi-K3) and can
+	// optionally replace the generated variants as an escape hatch.
 	if spec, ok := variants.Lookup(key); ok {
 		if spec.Reasoning {
 			cfg.Reasoning = true
@@ -324,8 +356,8 @@ func (g *Generator) marshalYAML(modelsMap map[string]ModelConfig) string {
 	sb.WriteString("    npm: @ai-sdk/openai-compatible\n")
 	sb.WriteString("    name: Synthetic\n")
 	sb.WriteString("    options:\n")
-	sb.WriteString(fmt.Sprintf("      baseURL: %s\n", g.baseURL))
-	sb.WriteString(fmt.Sprintf("      apiKey: %s\n", g.apiKeyLabel()))
+	fmt.Fprintf(&sb, "      baseURL: %s\n", g.baseURL)
+	fmt.Fprintf(&sb, "      apiKey: %s\n", g.apiKeyLabel())
 	sb.WriteString("    models:\n")
 
 	keys := make([]string, 0, len(modelsMap))
@@ -336,31 +368,31 @@ func (g *Generator) marshalYAML(modelsMap map[string]ModelConfig) string {
 
 	for _, id := range keys {
 		cfg := modelsMap[id]
-		sb.WriteString(fmt.Sprintf("      %s:\n", yamlKey(id)))
-		sb.WriteString(fmt.Sprintf("        name: %s\n", cfg.Name))
+		fmt.Fprintf(&sb, "      %s:\n", yamlKey(id))
+		fmt.Fprintf(&sb, "        name: %s\n", cfg.Name)
 		if cfg.Reasoning {
 			sb.WriteString("        reasoning: true\n")
 		}
-		sb.WriteString(fmt.Sprintf("        tool_call: %t\n", cfg.ToolCall))
+		fmt.Fprintf(&sb, "        tool_call: %t\n", cfg.ToolCall)
 		sb.WriteString("        limit:\n")
-		sb.WriteString(fmt.Sprintf("          context: %d\n", cfg.Limit.Context))
-		sb.WriteString(fmt.Sprintf("          output: %d\n", cfg.Limit.Output))
+		fmt.Fprintf(&sb, "          context: %d\n", cfg.Limit.Context)
+		fmt.Fprintf(&sb, "          output: %d\n", cfg.Limit.Output)
 		sb.WriteString("        modalities:\n")
-		sb.WriteString(fmt.Sprintf("          input: [%s]\n", strings.Join(cfg.Modalities.Input, ", ")))
-		sb.WriteString(fmt.Sprintf("          output: [%s]\n", strings.Join(cfg.Modalities.Output, ", ")))
+		fmt.Fprintf(&sb, "          input: [%s]\n", strings.Join(cfg.Modalities.Input, ", "))
+		fmt.Fprintf(&sb, "          output: [%s]\n", strings.Join(cfg.Modalities.Output, ", "))
 		if cfg.Cost != nil {
 			sb.WriteString("        cost:\n")
 			if cfg.Cost.Input != 0 {
-				sb.WriteString(fmt.Sprintf("          input: %g\n", cfg.Cost.Input))
+				fmt.Fprintf(&sb, "          input: %g\n", cfg.Cost.Input)
 			}
 			if cfg.Cost.Output != 0 {
-				sb.WriteString(fmt.Sprintf("          output: %g\n", cfg.Cost.Output))
+				fmt.Fprintf(&sb, "          output: %g\n", cfg.Cost.Output)
 			}
 			if cfg.Cost.CacheRead != 0 {
-				sb.WriteString(fmt.Sprintf("          cache_read: %g\n", cfg.Cost.CacheRead))
+				fmt.Fprintf(&sb, "          cache_read: %g\n", cfg.Cost.CacheRead)
 			}
 			if cfg.Cost.CacheWrite != 0 {
-				sb.WriteString(fmt.Sprintf("          cache_write: %g\n", cfg.Cost.CacheWrite))
+				fmt.Fprintf(&sb, "          cache_write: %g\n", cfg.Cost.CacheWrite)
 			}
 		}
 		if len(cfg.Variants) > 0 {
@@ -371,14 +403,14 @@ func (g *Generator) marshalYAML(modelsMap map[string]ModelConfig) string {
 			}
 			sort.Strings(variantNames)
 			for _, vname := range variantNames {
-				sb.WriteString(fmt.Sprintf("          %s:\n", vname))
+				fmt.Fprintf(&sb, "          %s:\n", vname)
 				optKeys := make([]string, 0, len(cfg.Variants[vname]))
 				for k := range cfg.Variants[vname] {
 					optKeys = append(optKeys, k)
 				}
 				sort.Strings(optKeys)
 				for _, ok := range optKeys {
-					sb.WriteString(fmt.Sprintf("            %s: %v\n", ok, cfg.Variants[vname][ok]))
+					fmt.Fprintf(&sb, "            %s: %v\n", ok, cfg.Variants[vname][ok])
 				}
 			}
 		}
@@ -427,7 +459,7 @@ func (g *Generator) GenerateFullConfig(models []types.Model) (string, error) {
 		var sb strings.Builder
 		sb.WriteString("models:\n")
 		for _, id := range modelIDs {
-			sb.WriteString(fmt.Sprintf("  - %s\n", id))
+			fmt.Fprintf(&sb, "  - %s\n", id)
 		}
 		sb.WriteString("\nsettings:\n")
 		sb.WriteString("  temperature: 0.7\n")
